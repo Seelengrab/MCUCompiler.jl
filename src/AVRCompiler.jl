@@ -41,31 +41,41 @@ function native_job(@nospecialize(func), @nospecialize(types), params)
     job = GPUCompiler.CompilerJob(target, source, params)
 end
 
-function build_ir(job, @nospecialize(func), @nospecialize(types))
+function build_ir(job, @nospecialize(func), @nospecialize(types); opt=true)
     @info "Bulding LLVM IR for '$func($types)'"
     mi, _ = GPUCompiler.emit_julia(job)
     ir, ir_meta = GPUCompiler.emit_llvm(
                     job, # our job
                     mi; # the method instance to compile
-                    libraries=false, # whether this code uses libraries
-                    deferred_codegen=false, # is there runtime codegen?
-                    optimize=true, # do we want to optimize the llvm?
-                    only_entry=false, # is this an entry point?
+                    libraries=false, # whether this code uses GPU libraries
+                    deferred_codegen=false, # should we resolve codegen?
+                    optimize=opt, # do we want to optimize the llvm?
+                    only_entry=false, # only keep the entry point?
                     ctx=JuliaContext()) # the LLVM context to use
     return ir, ir_meta
 end
 
-function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoParams("unnamed"); kwargs...)
+function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoParams("unnamed"); str=true, val=true)
     job = native_job(func, types, params)
     @info "Compiling AVR ASM for '$func($types)'"
     ir, ir_meta = build_ir(job, func, types)
     obj, _ = GPUCompiler.emit_asm(
                 job, # our job
                 ir; # the IR we got
-                strip=true, # should the binary be stripped of debug info?
-                validate=true, # should the LLVM IR be validated?
+                strip=str, # should the binary be stripped of debug info?
+                validate=val, # should the LLVM IR be validated?
                 format=LLVM.API.LLVMObjectFile) # What format would we like to create?
     return obj
+end
+
+
+function builddump(fun, args)
+   obj = build_obj(fun, args)
+   mktemp() do path, io
+       write(io, obj)
+       flush(io)
+       str = read(`avr-objdump -dr $path`, String)
+   end |> print
 end
 
 end # module AVRCompiler

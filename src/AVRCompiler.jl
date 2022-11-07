@@ -57,8 +57,8 @@ end
 
 function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoParams("unnamed"); strip=true, validate=true)
     job = native_job(func, types, params)
-    @info "Compiling AVR ASM for '$func($types)'"
     ir, ir_meta = build_ir(job, func, types)
+    @info "Compiling AVR ASM for '$func($types)'"
     obj, _ = GPUCompiler.emit_asm(
                 job, # our job
                 ir; # the IR we got

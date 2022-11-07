@@ -41,7 +41,7 @@ function native_job(@nospecialize(func), @nospecialize(types), params)
     job = GPUCompiler.CompilerJob(target, source, params)
 end
 
-function build_ir(job, @nospecialize(func), @nospecialize(types); opt=true)
+function build_ir(job, @nospecialize(func), @nospecialize(types); optimize=true)
     @info "Bulding LLVM IR for '$func($types)'"
     mi, _ = GPUCompiler.emit_julia(job)
     ir, ir_meta = GPUCompiler.emit_llvm(
@@ -49,28 +49,28 @@ function build_ir(job, @nospecialize(func), @nospecialize(types); opt=true)
                     mi; # the method instance to compile
                     libraries=false, # whether this code uses GPU libraries
                     deferred_codegen=false, # should we resolve codegen?
-                    optimize=opt, # do we want to optimize the llvm?
+                    optimize=optimize, # do we want to optimize the llvm?
                     only_entry=false, # only keep the entry point?
                     ctx=JuliaContext()) # the LLVM context to use
     return ir, ir_meta
 end
 
-function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoParams("unnamed"); str=true, val=true)
+function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoParams("unnamed"); strip=true, validate=true)
     job = native_job(func, types, params)
     @info "Compiling AVR ASM for '$func($types)'"
     ir, ir_meta = build_ir(job, func, types)
     obj, _ = GPUCompiler.emit_asm(
                 job, # our job
                 ir; # the IR we got
-                strip=str, # should the binary be stripped of debug info?
-                validate=val, # should the LLVM IR be validated?
+                strip=strip, # should the binary be stripped of debug info?
+                validate=validate, # should the LLVM IR be validated?
                 format=LLVM.API.LLVMObjectFile) # What format would we like to create?
     return obj
 end
 
 
-function builddump(@nospecialize(fun), @nospecialize(args))
-   obj = build_obj(fun, args)
+function builddump(@nospecialize(func), @nospecialize(args))
+   obj = build_obj(func, args)
    mktemp() do path, io
        write(io, obj)
        flush(io)

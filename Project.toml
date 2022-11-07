@@ -1,7 +1,7 @@
 name = "AVRCompiler"
 uuid = "680192cc-e9a1-4318-adc5-b31ee40f6b9b"
 authors = ["Sukera <Seelengrab@users.noreply.github.com>"]
-version = "0.2.1"
+version = "0.3.0"
 
 [deps]
 GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"

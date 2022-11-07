@@ -64,25 +64,25 @@ your program will probably segfault.
 AVRCompiler.jl currently provides 3 functions for use/inspection:
 
  * `native_job(f, types, params)`
-  * `f`: The function to compile - most commonly `main`, taking no arguments
-  * `types`: The argument types to the function - most commonly the empty tuple `()`
-  * `params`: An `ArduinoParams` object containing metadata for the build, like the name to be used for identification in the binary
-  * Returns a `GPUCompiler.Compilerjob`, which is the job context that will be used for compilation
+   * `f`: The function to compile - most commonly `main`, taking no arguments
+   * `types`: The argument types to the function - most commonly the empty tuple `()`
+   * `params`: An `ArduinoParams` object containing metadata for the build, like the name to be used for identification in the binary
+   * Returns a `GPUCompiler.Compilerjob`, which is the job context that will be used for compilation
  * `build_ir(job, f, types; optimize=true)`
-  * `job`: The `CompilerJob` object to be used for compilation context
-  * `f`: The function to compile - most commonly `main`, taking no arguments
-  * `types`: The argument types to the function - most commonly the empty tuple `()`
-  * `optimize`: A keyword argument specifying whether the IR should be optimized by GPUCompiler - currently mandatory to be `true`, if you want the build to remove unused references to the julia runtime (which we can't use on a microcontroller)
-  * Returns a tuple of LLVM-IR and IR-metadata
+   * `job`: The `CompilerJob` object to be used for compilation context
+   * `f`: The function to compile - most commonly `main`, taking no arguments
+   * `types`: The argument types to the function - most commonly the empty tuple `()`
+   * `optimize`: A keyword argument specifying whether the IR should be optimized by GPUCompiler - currently mandatory to be `true`, if you want the build to remove unused references to the julia runtime (which we can't use on a microcontroller)
+   * Returns a tuple of LLVM-IR and IR-metadata
  * `build_obj(func, types[, params]; strip=true, validate=true)`
-  * `func`: The function to compile
-  * `types`: The types of the arguments to compile for func
-  * `params`: An `ArduinoParams` object containing metadata for the build - defaults to `ArduinoParams("unnamed")`
-  * `strip`: A keyword argument specifying whether the binary should be stripped of symbols - defaults to `true`
-  * `validate`: A keyword argument specifying whether LLVM should check the produce IR for being correct - defaults to `true`
-  * Returns the built artifact as an object file in form of a string. Can be written to disk like `write(outpath, obj)`
+   * `func`: The function to compile
+   * `types`: The types of the arguments to compile for func
+   * `params`: An `ArduinoParams` object containing metadata for the build - defaults to `ArduinoParams("unnamed")`
+   * `strip`: A keyword argument specifying whether the binary should be stripped of symbols - defaults to `true`
+   * `validate`: A keyword argument specifying whether LLVM should check the produce IR for being correct - defaults to `true`
+   * Returns the built artifact as an object file in form of a string. Can be written to disk like `write(outpath, obj)`
 * `builddump(func, args)`
-  * `func`: The function to compile
-  * `args`: The argument types to compile `func` with
-  * Compiles & ultimately prints a decompiled dump of the unlinked object file
-  * Requires `avr-objdump` to be installed on your system (most commonly installable under the name `avr-binutils`)
+   * `func`: The function to compile
+   * `args`: The argument types to compile `func` with
+   * Compiles & ultimately prints a decompiled dump of the unlinked object file
+   * Requires `avr-objdump` to be installed on your system (most commonly installable under the name `avr-binutils`)

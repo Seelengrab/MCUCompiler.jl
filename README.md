@@ -2,6 +2,8 @@
 
 AVRCompiler.jl is a julia-to-AVR compiler support library. Its used for compiling julia source code to AVR assembly.
 
+To install this package, use `]add https://github.com/Seelengrab/AVRCompiler.jl`
+
 ## Requirements for use
 
 Since julia currently does not come with the AVR backend enabled, you will have to build julia yourself.
@@ -32,7 +34,8 @@ USE_BINARYBUILDER_LLVM=0
 
 The first patch enables the `AVR` backend to be built, the second tells the julia build process to build a local version of LLVM.
 
-Finally, build julia by running `make`.
+Finally, build julia by running `make`. Since you're also going to build LLVM, this can take some time - a full build of LLVM takes about
+45 minutes on my laptop, running a i7-6600U.
 
 ## Usage
 

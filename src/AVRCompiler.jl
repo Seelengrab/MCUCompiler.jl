@@ -69,7 +69,7 @@ function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoPara
 end
 
 
-function builddump(fun, args)
+function builddump(@nospecialize(fun), @nospecialize(args))
    obj = build_obj(fun, args)
    mktemp() do path, io
        write(io, obj)

@@ -7,12 +7,14 @@ using LLVM
 # Compiler Target
 #####
 
-struct Arduino <: GPUCompiler.AbstractCompilerTarget end
+struct StaticTarget <: GPUCompiler.AbstractCompilerTarget
+    triple::String
+end
 
-GPUCompiler.llvm_triple(::Arduino) = "thumbv7em-none-unknown-eabihf"
-GPUCompiler.runtime_slug(j::GPUCompiler.CompilerJob{Arduino}) = j.params.name
+GPUCompiler.llvm_triple(t::StaticTarget) = t.triple
+GPUCompiler.runtime_slug(j::GPUCompiler.CompilerJob{StaticTarget}) = j.params.name
 
-struct ArduinoParams <: GPUCompiler.AbstractCompilerParams
+struct StaticParams <: GPUCompiler.AbstractCompilerParams
     name::String
 end
 
@@ -26,18 +28,18 @@ module StaticRuntime
     report_exception_frame(idx, func, file, line) = return
 end
 
-GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{<:Any,ArduinoParams}) = StaticRuntime
-GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino}) = StaticRuntime
-GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = StaticRuntime
+GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{<:Any,StaticParams}) = StaticRuntime
+GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{StaticTarget}) = StaticRuntime
+GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{StaticTarget,StaticParams}) = StaticRuntime
 
-function native_job(@nospecialize(func), @nospecialize(types), params)
+function native_job(@nospecialize(func), @nospecialize(types), params, triple)
     @info "Creating compiler job for '$func($types)'"
     source = GPUCompiler.FunctionSpec(
                 func, # our function
                 Base.to_tuple_type(types), # its signature
                 false, # whether this is a GPU kernel
                 GPUCompiler.safe_name(repr(func))) # the name to use in the asm
-    target = Arduino()
+    target = StaticTarget(triple)
     job = GPUCompiler.CompilerJob(target, source, params)
 end
 
@@ -55,8 +57,8 @@ function build_ir(job, @nospecialize(func), @nospecialize(types); optimize=true)
     return ir, ir_meta
 end
 
-function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoParams("unnamed"); strip=true, validate=true)
-    job = native_job(func, types, params)
+function build_obj(@nospecialize(func), @nospecialize(types), params=StaticParams("unnamed"); strip=true, validate=true, triple="avr-unknown-unkown")
+    job = native_job(func, types, params, triple)
     ir, ir_meta = build_ir(job, func, types)
     @info "Compiling AVR ASM for '$func($types)'"
     obj, _ = GPUCompiler.emit_asm(

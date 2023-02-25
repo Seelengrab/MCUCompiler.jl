@@ -9,7 +9,7 @@ using LLVM
 
 struct Arduino <: GPUCompiler.AbstractCompilerTarget end
 
-GPUCompiler.llvm_triple(::Arduino) = "avr-unknown-unkown"
+GPUCompiler.llvm_triple(::Arduino) = "thumbv7em-none-unknown-eabihf"
 GPUCompiler.runtime_slug(j::GPUCompiler.CompilerJob{Arduino}) = j.params.name
 
 struct ArduinoParams <: GPUCompiler.AbstractCompilerParams

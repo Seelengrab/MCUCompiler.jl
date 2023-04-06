@@ -44,7 +44,7 @@ function native_job(@nospecialize(func), @nospecialize(types), params)
     target = Arduino()
     config = GPUCompiler.CompilerConfig(target, params;
                                         kernel=false,
-                                        name="_start",#String(nameof(func)),
+                                        name=String(nameof(func)),
                                         always_inline=false)
     job = GPUCompiler.CompilerJob(source, config)
 end

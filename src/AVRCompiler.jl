@@ -16,7 +16,7 @@ using avrdude_jll
 struct Arduino <: GPUCompiler.AbstractCompilerTarget end
 
 GPUCompiler.llvm_triple(::Arduino) = "avr-unknown-unkown"
-GPUCompiler.runtime_slug(j::GPUCompiler.CompilerJob{Arduino}) = j.params.name
+GPUCompiler.runtime_slug(j::GPUCompiler.CompilerJob{Arduino}) = j.config.params.name
 
 struct ArduinoParams <: GPUCompiler.AbstractCompilerParams
     name::String

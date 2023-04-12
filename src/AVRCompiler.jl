@@ -91,7 +91,7 @@ end
 #####
 
 """
-   build(mod::Module[, outpath::String]; clear=true)
+    build(mod::Module[, outpath::String]; clear=true)
 
 Compile the module `mod` and prepare it for flashing to a device, building an ELF.
 This function expects a `main()` without arguments to exist, which will be used as the entry point.
@@ -130,15 +130,21 @@ function build(mod::Module, outpath; clear=true)
         run(`$bin -v -o $builtelf_name $builtobj_path`)
     end
 
+    mainhex_name = string(nameof(mod), ".hex")
+    builthex_name = joinpath(buildpath, mainhex_name)
+    avr_objcopy() do bin
+        run(`$bin -O ihex $builtelf_name $builthex_name`)
+    end
+
     @info "Moving files from temporary directory to output directory"
     clear || (outpath = joinpath(outpath, string(now())))
     mkpath(outpath)
     mv(buildpath, outpath; force=true)
-    joinpath(outpath, mainelf_name)
+    joinpath(outpath, mainhex_name)
 end
 
 """
-   list_mcus()
+    list_mcus()
 
 List the microcontrollers supported by `avrdude`.
 """
@@ -150,13 +156,13 @@ function list_mcus()
 end
 
 """
-  flash(path, bin, partno
-        ; clear=true, verify=true, programmer=:arduino)
+    flash(path, bin, partno
+          ; clear=true, verify=true, programmer=:arduino)
 
 Flash the binary `bin` to the device connected at `path`.
 `partno` specifies the microcontroller that will be flashed.
 
- * `clear` specifies whether the flash ROM of the device
+ * `clear` specifies whether to clear the flash ROM of the device
  * `verify` tells the programmer to verify the written data
  * `programmer` specifies the programmer to use for flashing
 

@@ -2,9 +2,11 @@ module AVRCompiler
 
 using GPUCompiler
 using LLVM
-using Pkg: Pkg
+using JET
 
+using Pkg: Pkg
 using Dates
+using Logging
 
 using avr_binutils_jll
 using avrdude_jll
@@ -36,8 +38,8 @@ GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{<:Any,ArduinoParams}) = Sta
 GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino}) = StaticRuntime
 GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = StaticRuntime
 
-function native_job(@nospecialize(func), @nospecialize(types), params)
-    @info "Creating compiler job for '$func$types'"
+function avr_job(@nospecialize(func), @nospecialize(types), params=ArduinoParams("$(nameof(func))"))
+    # @info "Creating compiler job for '$func$types'"
     source = GPUCompiler.methodinstance(
                 typeof(func), # our function
                 Base.to_tuple_type(types)) # its signature
@@ -91,30 +93,58 @@ end
 #####
 
 """
-    build(mod::Module[, outpath::String]; clear=true)
+    build(mod::Module[, outpath::String]; clear=false, target=:build)
 
 Compile the module `mod` and prepare it for flashing to a device, building an ELF.
 This function expects a `main()` without arguments to exist, which will be used as the entry point.
 `main` needs to be exported from `mod`.
 
-The built product will be placed in the `out` directory of the current project,
-clearing the directory before writing. This can be overwritten by specifying `outpath`.
-If the directory does not exist, it will be created.
-Specifying `clear=false` will instead place the output in a subdirectory of `outpath`, named after the date & build time.
+The built product will be placed in `outpath` under a directory named after the build date & time.
+The default for `outpath` is the `out` directory under the project root of the given module.
+`clear` specifies whether `outpath` should be cleared before building.
 
-Returns the path to the main executable ELF.
+`target` can be one of these:
+
+    * `:build` produce a `.o` file as part of the compilation process
+    * `:llvm` instead of building an object, output LLVM IR. It is usually preferrable to use `GPUCompiler.code_llvm` for this in combination with `AVRCompiler.avr_job`.
+    * `:asm` instead of building an object, output ASM. It is usually preferrable to inspect the actual binary after compilation & linking.
+
+A symlink `latest` pointing to the latest built binary will be created.
 """
-build(mod::Module; clear=true) = build(mod, joinpath(dirname(Pkg.project().path), "out/"); clear)
+build(mod::Module; clear=true, target=:build, strip=true) = build(mod, joinpath(dirname(Pkg.project().path), "out/"); clear, target, strip)
 
-function build(mod::Module, outpath; clear=true)
+function build(mod::Module, outpath; clear=false, target=:build, strip=true)
     !isdirpath(outpath) && throw(ArgumentError("Given path `$path` does not describe a directory (doesn't end with a path seperator like `/`)!"))
     !hasproperty(mod, :main) && throw(ArgumentError("Module `$mod` doesn't have a `main` entrypoint!"))
+    target in (:build, :llvm, :asm)  || throw(ArgumentError("Supplied unsupported target: `$target`"))
     any(m -> isone(m.nargs), methods(mod.main)) || throw(ArgumentError("`main` has no method taking zero arguments!"))
-
-    @info "Building main object file"
     buildpath = mktempdir()
+
+    @info "Checking for statically known problems"
+    static_errors = false
+    callresults = JET.report_call(mod.main, ())
+    if !isempty(JET.get_reports(callresults))
+        display(callresults)
+        static_errors = true
+    end
+    optresults = JET.report_opt(mod.main, ())
+    if !isempty(JET.get_reports(optresults))
+        display(optresults)
+        static_errors = true
+    end
+    # Fix your errors before compilation :^)
+    if static_errors
+        @error "Static errors detected - aborting compilation"
+        return
+    end
+
     params = ArduinoParams(String(nameof(mod)))
-    obj = build_obj(mod.main, (), params)
+    obj = GPUCompiler.compile(target, native_job(mod.main, (), params); ctx=GPUCompiler.JuliaContext(), strip)[1]
+    if target != :build
+        print(obj)
+        return
+    end
+    @info "Building main object file"
     mainobj_name = string(nameof(mod), ".o")
     builtobj_path = joinpath(buildpath, mainobj_name)
     open(builtobj_path, "w") do io
@@ -150,10 +180,18 @@ function build(mod::Module, outpath; clear=true)
     end
 
     @info "Moving files from temporary directory to output directory"
-    clear || (outpath = joinpath(outpath, string(now())))
+    if clear
+        rm(outpath; force=true, recursive=true)
+    end
     mkpath(outpath)
-    mv(buildpath, outpath; force=true)
-    joinpath(outpath, mainhex_name)
+    latestpath = joinpath(outpath, "latest")
+    outpath = joinpath(outpath, string(now()))
+    mv(buildpath, outpath)
+    if ispath(latestpath)
+        rm(latestpath)
+    end
+    symlink(basename(outpath), latestpath; dir_target=true)
+    nothing
 end
 
 """

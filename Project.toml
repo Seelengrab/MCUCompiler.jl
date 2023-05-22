@@ -1,15 +1,17 @@
 name = "AVRCompiler"
 uuid = "680192cc-e9a1-4318-adc5-b31ee40f6b9b"
 authors = ["Sukera <Seelengrab@users.noreply.github.com>"]
-version = "0.4.1"
+version = "0.4.2"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 avr_binutils_jll = "89a19a88-f0c6-5ede-9587-7a2c5ccf09c7"
 avrdude_jll = "0e386048-9400-53f3-9e91-0210ee04dc3b"
 
 [compat]
-GPUCompiler = "0.19.0"
+GPUCompiler = "0.20.0"

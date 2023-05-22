@@ -51,41 +51,215 @@ function avr_job(@nospecialize(func), @nospecialize(types), params=ArduinoParams
     job = GPUCompiler.CompilerJob(source, config)
 end
 
-function build_ir(job, @nospecialize(func), @nospecialize(types); optimize=true)
-    @info "Bulding LLVM IR for '$func$types'"
-    ir, ir_meta = GPUCompiler.emit_llvm(
-                    job; # our job
-                    libraries=false, # whether this code uses GPU libraries
-                    deferred_codegen=false, # should we resolve codegen?
-                    optimize=optimize, # do we want to optimize the llvm?
-                    only_entry=false, # only keep the entry point/inline everything?
-                    ctx=JuliaContext()) # the LLVM context to use
-    return ir, ir_meta
+const jlfuncs = (cglobal(:jl_alloc_array_1d) => :jl_alloc_array_1d,
+                 cglobal(:jl_alloc_array_2d) => :jl_alloc_array_2d,
+                 cglobal(:jl_alloc_array_3d) => :jl_alloc_array_3d,
+                 cglobal(:jl_new_array) => :jl_new_array,
+                 cglobal(:jl_array_copy) => :jl_array_copy,
+                 cglobal(:jl_alloc_string) => :jl_alloc_string,
+                 cglobal(:jl_in_threaded_region) => :jl_in_threaded_region,
+                 cglobal(:jl_enter_threaded_region) => :jl_enter_threaded_region,
+                 cglobal(:jl_exit_threaded_region) => :jl_exit_threaded_region,
+                 cglobal(:jl_set_task_tid) => :jl_set_task_tid,
+                 cglobal(:jl_new_task) => :jl_new_task,
+                 cglobal(:jl_array_grow_beg) => :jl_array_grow_beg,
+                 cglobal(:jl_array_grow_end) => :jl_array_grow_end,
+                 cglobal(:jl_array_grow_at) => :jl_array_grow_at,
+                 cglobal(:jl_array_del_beg) => :jl_array_del_beg,
+                 cglobal(:jl_array_del_end) => :jl_array_del_end,
+                 cglobal(:jl_array_del_at) => :jl_array_del_at,
+                 cglobal(:jl_array_ptr) => :jl_array_ptr,
+                 cglobal(:jl_value_ptr) => :jl_value_ptr,
+                 cglobal(:jl_get_ptls_states) => :jl_get_ptls_states,
+                 cglobal(:jl_gc_add_finalizer_th) => :jl_gc_add_finalizer_th,
+                 cglobal(:malloc) => :malloc,
+                 cglobal(:memmove) => :memmove,
+                 cglobal(:jl_symbol_n) => :jl_symbol_n)
+
+"""
+   is_object_moveable(obj)
+
+Heuristic for whether the object could be moved to a statically compiled LLVM module.
+
+This essentially checks whether the object is pointerfree, by checking whether all its fields are allocated inline.
+This is more conservative than necessary, since e.g. the following `f` would also be moveable, due to the memory of `Foo`
+always having a defined size. The wrapped `Bar` would also need to be moved to the module.
+
+```
+mutable struct Bar
+   a::Int
 end
 
-function build_obj(@nospecialize(func), @nospecialize(types), params=ArduinoParams("unnamed")
-                   ;strip=true, validate=true)
-    job = native_job(func, types, params)
-    ir, ir_meta = build_ir(job, func, types)
-    @info "Compiling AVR ASM for '$func$types'"
-    obj, _ = GPUCompiler.emit_asm(
-                job, # our job
-                ir; # the IR we got
-                strip=strip, # should the binary be stripped of debug info?
-                validate=validate, # should the LLVM IR be validated?
-                format=LLVM.API.LLVMObjectFile) # What format would we like to create?
-    return obj
+mutable struct Foo
+   b::Bar
 end
 
-function builddump(@nospecialize(func), @nospecialize(args))
-   obj = build_obj(func, args)
-   mktemp() do path, io
-       write(io, obj)
-       flush(io)
-       str = avr_objdump() do bin
-            read(`$bin -dr $path`, String)
-       end
-   end |> print
+const f = Foo(Bar(1))
+```
+
+Theoretically, the only objects that can't be moved like this are `Array`s and `String`s, due to their size not being a function of their type.
+"""
+function is_object_moveable(obj)
+    mapreduce(Base.allocatedinline, &, fieldtypes(typeof(obj)); init=true)
+end
+
+const llmod = Ref{LLVM.Module}()
+const globalNamesCount = Dict{DataType, Int}()
+
+function GPUCompiler.process_module!(@nospecialize(job::GPUCompiler.CompilerJob{Arduino}), mod::LLVM.Module)
+    return
+    ctx = context(mod)
+    llmod[] = mod
+    empty!(globalNamesCount)
+    interned_objects = Dict{UInt, Any}()
+
+    for f in functions(mod), b in blocks(f), i in instructions(b), o in operands(i)
+        # only look at `inttoptr` for now
+        # and only if they're conversions from constants
+        o isa LLVM.ConstantExpr || continue
+        opcode(o) === LLVM.API.LLVMIntToPtr || continue
+        ptr_from_const  = o
+
+        # patch objects that we can actually intern here
+        # For now, we just _assume_ that pointers larger than 0xFFFF are
+        # valid julia pointers. The number is the largest SRAM of any ATmega.
+        # This also ignores AVR32.
+
+        # The general steps are as follows:
+        #  * Get the object this is pointing to
+        #     (unless we already did that - then skip to the last step)
+        #  * Check if its internable
+        #  * Intern the object by copying its plain bits to an LLVM global
+        #  * patch the use by replacing the `inttoptr` with just a pointer to the global
+
+        ptrconst = only(operands(ptr_from_const))
+        ptrconst isa LLVM.ConstantInt || continue
+        ptrval = convert(UInt, ptrconst)
+        # TODO: sometimes, inttoptr constants in the IR are truncated to the target pointersize, so do a second pass later to check whether we're in the extent of a known object with those.
+        if ptrval > 0xFFFF
+            @warn """
+                Encountered a pointer literal greater than the available memory.
+                This likely means julia emitted some literal to either a global constant,
+                or to some function global of the current session. This will lead to problems.
+                """ Ptr=ptrval
+            continue
+        else
+            continue # this should prevent "interning" of MMIO
+        end
+        # we better be sure this is actually a julia pointer here - it ought to be..
+        # if it isn't we segfault here!
+        ptr = Ptr{Any}(ptrval)
+        @debug ptr
+        jl_cfunc_idx = findfirst(jlfuncs) do arg
+            symptr, _ = arg
+            symptr == ptr
+        end
+        if !isnothing(jl_cfunc_idx)
+            @warn """
+                A direct call to the runtime was encountered.
+                The resulting binary WILL NOT WORK as intended.
+                """ Ptr=ptrval Func=jlfuncs[jl_cfunc_idx][end]
+            continue
+        end
+
+        obj = unsafe_pointer_to_objref(ptr)
+        @debug typeof(obj)
+        if !is_object_moveable(obj)
+            # ok, we have an object, but we can't move it - log the object & type
+            # so the user knows that *something* is up and this won't work on a
+            # real device (if we don't crash during compilation later).
+            # The pointer will end up truncated in the IR, any may be eliminated
+            # entirely in the resulting assembly..
+            @warn """
+                An object was encountered that could not be interned to the target platform.
+                The resulting binary WILL NOT WORK as intended.
+                """ Ptr=ptrval Type=typeof(obj) Object=obj
+            continue
+        end
+
+        # we have an object, and it is internable! So let's intern it.
+        @debug "Found internable object" Ptr=ptrval Type=typeof(obj) Object=obj
+        g = build_global!(mod, obj)
+        @debug "Created global variable in module" Global=g
+
+        # Second, replace uses of the original pointer with a pointer to this global
+        LLVM.replace_uses!(ptr_from_const, g)
+
+        # We're done!
+    end
+end
+
+function build_global!(mod, obj)
+    ctx = context(mod)
+    T = typeof(obj)
+    llvm_types = LLVM.LLVMType[]
+    llvm_objs = LLVM.Constant[]
+    for (elt, elname) in zip(fieldtypes(T), fieldnames(T))
+        llvm_t = llvm_type(ctx, elt)
+        llvm_obj = llvm_constant(llvm_t, getfield(obj, elname))
+        push!(llvm_types, llvm_t)
+        push!(llvm_objs, llvm_obj)
+    end
+
+    structType = LLVM.StructType(llvm_types; ctx)
+    get!(globalNamesCount, T, 0)
+    num = (globalNamesCount[T] += 1)
+    globalVar = LLVM.GlobalVariable(mod, structType, "$(T)_$num")
+    constant!(globalVar, !ismutable(obj))
+    initialValue = LLVM.ConstantStruct(structType, llvm_objs)
+    initializer!(globalVar, initialValue)
+
+    globalVar
+end
+
+function llvm_type(ctx, ::Type{T}) where T
+    if isprimitivetype(T) || T <: Base.BitInteger
+        LLVM.IntType(sizeof(T)*8; ctx)
+    elseif T <: NTuple
+        elt = llvm_type(first(t.parameters))
+        len = length(t.parameters)
+        LLVM.ArrayType(elt, len)
+    elseif T <: Base.IEEEFloat
+        if T === Float16
+            LLVM.LLVMHalf
+        elseif T === Float32
+            LLVM.LLVMFloat
+        elseif T === Float64
+            LLVM.LLVMDouble
+        end
+    end
+end
+
+function LLVM.ConstantInt(typ::LLVM.IntegerType, val::T) where T
+    isprimitivetype(T) || throw(ArgumentError("Cannot ConstantInt non-primitive type `$T`"))
+    valbits = sizeof(T)*8
+    if valbits >= 64
+        numwords = cld(valbits, 64)
+        words = Vector{Culonglong}(undef, numwords)
+        for i in 1:numwords
+            shint = 64*(i-1)
+            sh = Core.Intrinsics.zext_int(T, shint)
+            v = Core.Intrinsics.lshr_int(val, sh)
+            words[i] = Core.Intrinsics.trunc_int(Culonglong, v)
+        end
+        return LLVM.ConstantInt(LLVM.API.LLVMConstIntOfArbitraryPrecision(typ, numwords, words))
+    else
+        v = Core.Intrinsics.zext_int(Int64, val)
+        return LLVM.ConstantInt(typ, v)
+    end
+end
+
+function llvm_constant(llvm_t, obj)
+    T = typeof(obj)
+    if isprimitivetype(T) || T <: Base.BitInteger
+        LLVM.ConstantInt(llvm_t, obj)
+    elseif T <: NTuple
+        LLVM.ConstantArray(llvm_t, [ llvm_constant(llvm_type(first(t.parameters)),  o) for o in obj ])
+    elseif T <: Base.IEEEFloat
+        LLVM.ConstantFP(obj)
+    else
+        @warn "Unknown Type encountered" Type=T, LLVMType=llvm_t, Obj=obj
+    end
 end
 
 #####
@@ -139,7 +313,7 @@ function build(mod::Module, outpath; clear=false, target=:build, strip=true)
     end
 
     params = ArduinoParams(String(nameof(mod)))
-    obj = GPUCompiler.compile(target, native_job(mod.main, (), params); ctx=GPUCompiler.JuliaContext(), strip)[1]
+    obj = GPUCompiler.compile(target, avr_job(mod.main, (), params); ctx=GPUCompiler.JuliaContext(), strip)[1]
     if target != :build
         print(obj)
         return
@@ -235,6 +409,7 @@ function flash(path, binpath, partno; clear=true, verify=true, programmer=:ardui
     avrdude() do bin
         run(`$bin $verifyarg -c $programmer -p $partno -P $path $cleararg -U $flasharg`)
     end
+    nothing
 end
 
 end # module AVRCompiler

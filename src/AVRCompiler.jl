@@ -122,12 +122,25 @@ function build(mod::Module, outpath; clear=true)
         flush(io)
     end
 
+    @info "Building vectors"
+    vectorasm_path = joinpath(buildpath, "vectors.asm")
+    vectorobj_path = joinpath(buildpath, "vectors.o")
+    open(vectorasm_path, "w") do io
+        println(io, """
+          .vectors:
+                rjmp main
+          """)
+        # TODO: `println` additional calls for interrupt vectors
+    end
+    avr_as() do bin
+        run(`$bin -o $vectorobj_path $vectorasm_path`)
+    end
+
     @info "Linking object files to ELF"
     mainelf_name = string(nameof(mod), ".elf")
     builtelf_name = joinpath(buildpath, mainelf_name)
-    # TODO: Link with vector table shenanigans, if needed
     avr_ld() do bin
-        run(`$bin -v -o $builtelf_name $builtobj_path`)
+        run(`$bin -v -o $builtelf_name $vectorobj_path $builtobj_path`)
     end
 
     mainhex_name = string(nameof(mod), ".hex")

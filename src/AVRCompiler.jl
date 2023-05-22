@@ -267,7 +267,7 @@ end
 #####
 
 """
-    build(mod::Module[, outpath::String]; clear=false, target=:build)
+    build(mod::Module[, outpath::String]; clear=false, target=:build, optimize=true, validate=true)
 
 Compile the module `mod` and prepare it for flashing to a device, building an ELF.
 This function expects a `main()` without arguments to exist, which will be used as the entry point.
@@ -283,37 +283,43 @@ The default for `outpath` is the `out` directory under the project root of the g
     * `:llvm` instead of building an object, output LLVM IR. It is usually preferrable to use `GPUCompiler.code_llvm` for this in combination with `AVRCompiler.avr_job`.
     * `:asm` instead of building an object, output ASM. It is usually preferrable to inspect the actual binary after compilation & linking.
 
+`optimize` specifies whether the binary should be optimized. This will likely be required, to remove julia specific calls into the runtime that are unused.
+`validate` specifies whether the code should be validated to work with some basic heuristics, as well as whether GPUCompiler.jl should run its internal validation logic.
+
 A symlink `latest` pointing to the latest built binary will be created.
 """
-build(mod::Module; clear=true, target=:build, strip=true) = build(mod, joinpath(dirname(Pkg.project().path), "out/"); clear, target, strip)
+build(mod::Module; clear=true, target=:build, strip=true, optimize=true, validate=true) = build(mod, joinpath(dirname(Pkg.project().path), "out/"); clear, target, strip, optimize, validate)
 
-function build(mod::Module, outpath; clear=false, target=:build, strip=true)
+function build(mod::Module, outpath; clear=false, target=:build, strip=true, optimize=true, validate=true)
     !isdirpath(outpath) && throw(ArgumentError("Given path `$path` does not describe a directory (doesn't end with a path seperator like `/`)!"))
     !hasproperty(mod, :main) && throw(ArgumentError("Module `$mod` doesn't have a `main` entrypoint!"))
     target in (:build, :llvm, :asm)  || throw(ArgumentError("Supplied unsupported target: `$target`"))
     any(m -> isone(m.nargs), methods(mod.main)) || throw(ArgumentError("`main` has no method taking zero arguments!"))
     buildpath = mktempdir()
 
-    @info "Checking for statically known problems"
-    static_errors = false
-    callresults = JET.report_call(mod.main, ())
-    if !isempty(JET.get_reports(callresults))
-        display(callresults)
-        static_errors = true
-    end
-    optresults = JET.report_opt(mod.main, ())
-    if !isempty(JET.get_reports(optresults))
-        display(optresults)
-        static_errors = true
-    end
-    # Fix your errors before compilation :^)
-    if static_errors
-        @error "Static errors detected - aborting compilation"
-        return
+    if validate
+        @info "Checking for statically known problems"
+        static_errors = false
+        callresults = JET.report_call(mod.main, ())
+        if !isempty(JET.get_reports(callresults))
+            display(callresults)
+            static_errors = true
+        end
+        optresults = JET.report_opt(mod.main, ())
+        if !isempty(JET.get_reports(optresults))
+            display(optresults)
+            static_errors = true
+        end
+        # Fix your errors before compilation :^)
+        if static_errors
+            @error "Static errors detected - aborting compilation"
+            return
+        end
     end
 
     params = ArduinoParams(String(nameof(mod)))
-    obj = GPUCompiler.compile(target, avr_job(mod.main, (), params); ctx=GPUCompiler.JuliaContext(), strip)[1]
+    compile_goal = target == :build ? :obj : target
+    obj = GPUCompiler.compile(compile_goal, avr_job(mod.main, (), params); ctx=GPUCompiler.JuliaContext(), strip, optimize, validate)[1]
     if target != :build
         print(obj)
         return

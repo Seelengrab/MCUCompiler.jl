@@ -319,10 +319,11 @@ function build(mod::Module, outpath; clear=false, target=:build, strip=true, opt
 
     params = ArduinoParams(String(nameof(mod)))
     compile_goal = target == :build ? :obj : target
-    obj = GPUCompiler.compile(compile_goal, avr_job(mod.main, (), params); ctx=GPUCompiler.JuliaContext(), strip, optimize, validate)[1]
+    obj = GPUCompiler.JuliaContext() do ctx
+        GPUCompiler.compile(compile_goal, avr_job(mod.main, (), params); strip, optimize, validate)[1]
+    end
     if target != :build
-        print(obj)
-        return
+        return obj
     end
     @info "Building main object file"
     mainobj_name = string(nameof(mod), ".o")

@@ -12,6 +12,3 @@ Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 avr_binutils_jll = "89a19a88-f0c6-5ede-9587-7a2c5ccf09c7"
 avrdude_jll = "0e386048-9400-53f3-9e91-0210ee04dc3b"
-
-[compat]
-GPUCompiler = "0.20.0"

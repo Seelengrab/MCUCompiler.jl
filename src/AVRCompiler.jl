@@ -11,6 +11,8 @@ using Logging
 using avr_binutils_jll
 using avrdude_jll
 
+include("array.jl")
+
 #####
 # Compiler Target
 #####
@@ -27,7 +29,13 @@ end
 module StaticRuntime
     # the runtime library
     signal_exception() = return
-    malloc(sz) = C_NULL
+    function malloc(sz)
+        stored_ptr = Ptr{Ptr{Nothing}}(0x08F7 |> Int)
+        base = unsafe_load(stored_ptr)
+        nbase = base - sz
+        unsafe_store!(stored_ptr, nbase)
+        return nbase
+    end
     report_oom(sz) = return
     report_exception(ex) = return
     report_exception_name(ex) = return
@@ -37,6 +45,8 @@ end
 GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{<:Any,ArduinoParams}) = StaticRuntime
 GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino}) = StaticRuntime
 GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = StaticRuntime
+GPUCompiler.uses_julia_runtime(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = true
+GPUCompiler.can_throw(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = false
 
 function avr_job(@nospecialize(func), @nospecialize(types), params=ArduinoParams("$(nameof(func))"))
     # @info "Creating compiler job for '$func$types'"
@@ -320,7 +330,7 @@ function build(mod::Module, outpath; clear=false, target=:build, strip=true, opt
     params = ArduinoParams(String(nameof(mod)))
     compile_goal = target == :build ? :obj : target
     obj = GPUCompiler.JuliaContext() do ctx
-        GPUCompiler.compile(compile_goal, avr_job(mod.main, (), params); strip, optimize, validate)[1]
+        GPUCompiler.compile(compile_goal, avr_job(mod.main, (), params); strip, optimize, validate, libraries=true)[1]
     end
     if target != :build
         return obj

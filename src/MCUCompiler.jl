@@ -1,4 +1,4 @@
-module AVRCompiler
+module MCUCompiler
 
 using GPUCompiler
 using LLVM
@@ -8,58 +8,63 @@ using Pkg: Pkg
 using Dates
 using Logging
 
-using avr_binutils_jll
-using avrdude_jll
-
 include("array.jl")
 
-#####
-# Compiler Target
-#####
-
-struct Arduino <: GPUCompiler.AbstractCompilerTarget end
-
-GPUCompiler.llvm_triple(::Arduino) = "avr-unknown-unkown"
-GPUCompiler.runtime_slug(j::GPUCompiler.CompilerJob{Arduino}) = j.config.params.name
-
-struct ArduinoParams <: GPUCompiler.AbstractCompilerParams
-    name::String
+struct MCUTarget{T,P} <: GPUCompiler.AbstractCompilerTarget
+    params::P
+    MCUTarget{T}(params::P) where {T,P <: GPUCompiler.AbstractCompilerParams} = new{T, P}(params)
 end
 
-module StaticRuntime
-    # the runtime library
-    signal_exception() = return
-    function malloc(sz)
-        stored_ptr = Ptr{Ptr{Nothing}}(0x08F7 |> Int)
-        base = unsafe_load(stored_ptr)
-        nbase = base - sz
-        unsafe_store!(stored_ptr, nbase)
-        return nbase
-    end
-    report_oom(sz) = return
-    report_exception(ex) = return
-    report_exception_name(ex) = return
-    report_exception_frame(idx, func, file, line) = return
-end
+include("runtime.jl")
 
-GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{<:Any,ArduinoParams}) = StaticRuntime
-GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino}) = StaticRuntime
-GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = StaticRuntime
-GPUCompiler.uses_julia_runtime(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = true
-GPUCompiler.can_throw(::GPUCompiler.CompilerJob{Arduino,ArduinoParams}) = false
+"""
+    triple(::MCUTarget)
 
-function avr_job(@nospecialize(func), @nospecialize(types), params=ArduinoParams("$(nameof(func))"))
+Returns the target triple string for this compilation target.
+"""
+function triple end
+
+"""
+    build_vectors(::MCUTarget, buildpath)
+
+Assemble an object file containing a section for the vector jump table.
+
+!!! note "Jumping to main"
+    You may need to insert an explicit jump to `main` into your vector table, depending on how your MCU is initialized.
+"""
+function build_vectors end
+
+"""
+    link(::MCUTarget, elf_path, vectors, obj)
+
+Link the vectors' object file and the other binary object file to an ELF.
+"""
+function link end
+
+"""
+    postprocess(::MCUTarget, buildpath)
+
+Do any necessary postprocessing steps on the built ELF, such as converting to `ihex` for `avrdude`.
+"""
+function postprocess end
+
+GPUCompiler.llvm_triple(mcut::MCUTarget) = triple(mcut)
+GPUCompiler.runtime_slug(j::GPUCompiler.CompilerJob{<:MCUTarget}) = j.config.params.name
+
+function mcu_job(@nospecialize(func), @nospecialize(types), platform)
     # @info "Creating compiler job for '$func$types'"
     source = GPUCompiler.methodinstance(
                 typeof(func), # our function
                 Base.to_tuple_type(types)) # its signature
-    target = Arduino()
-    config = GPUCompiler.CompilerConfig(target, params;
+    config = GPUCompiler.CompilerConfig(platform, platform.params;
                                         kernel=false,
                                         name=String(nameof(func)),
                                         always_inline=false)
     job = GPUCompiler.CompilerJob(source, config)
 end
+
+# target specific definitions
+include("arduino.jl")
 
 const jlfuncs = (cglobal(:jl_alloc_array_1d) => :jl_alloc_array_1d,
                  cglobal(:jl_alloc_array_2d) => :jl_alloc_array_2d,
@@ -116,7 +121,7 @@ end
 const llmod = Ref{LLVM.Module}()
 const globalNamesCount = Dict{DataType, Int}()
 
-function GPUCompiler.process_module!(@nospecialize(job::GPUCompiler.CompilerJob{Arduino}), mod::LLVM.Module)
+function GPUCompiler.process_module!(@nospecialize(job::GPUCompiler.CompilerJob{<:MCUTarget}), mod::LLVM.Module)
     return
     ctx = context(mod)
     llmod[] = mod
@@ -130,6 +135,7 @@ function GPUCompiler.process_module!(@nospecialize(job::GPUCompiler.CompilerJob{
         opcode(o) === LLVM.API.LLVMIntToPtr || continue
         ptr_from_const  = o
 
+        # TODO: This really needs to be generalized a bit... or Julia doesn't emit them anymore later?
         # patch objects that we can actually intern here
         # For now, we just _assume_ that pointers larger than 0xFFFF are
         # valid julia pointers. The number is the largest SRAM of any ATmega.
@@ -298,9 +304,9 @@ The default for `outpath` is the `out` directory under the project root of the g
 
 A symlink `latest` pointing to the latest built binary will be created.
 """
-build(mod::Module; clear=true, target=:build, strip=true, optimize=true, validate=true) = build(mod, joinpath(dirname(Pkg.project().path), "out/"); clear, target, strip, optimize, validate)
+build(mod::Module, platform::MCUTarget; clear=true, target=:build, strip=true, optimize=true, validate=true) = build(mod, joinpath(dirname(Pkg.project().path), "out/"), platform; clear, target, strip, optimize, validate)
 
-function build(mod::Module, outpath; clear=false, target=:build, strip=true, optimize=true, validate=true)
+function build(mod::Module, outpath, platform::MCUTarget; clear=false, target=:build, strip=true, optimize=true, validate=true)
     !isdirpath(outpath) && throw(ArgumentError("Given path `$path` does not describe a directory (doesn't end with a path seperator like `/`)!"))
     !hasproperty(mod, :main) && throw(ArgumentError("Module `$mod` doesn't have a `main` entrypoint!"))
     target in (:build, :llvm, :asm)  || throw(ArgumentError("Supplied unsupported target: `$target`"))
@@ -327,10 +333,9 @@ function build(mod::Module, outpath; clear=false, target=:build, strip=true, opt
         end
     end
 
-    params = ArduinoParams(String(nameof(mod)))
     compile_goal = target == :build ? :obj : target
     obj = GPUCompiler.JuliaContext() do ctx
-        GPUCompiler.compile(compile_goal, avr_job(mod.main, (), params); strip, optimize, validate, libraries=true)[1]
+        GPUCompiler.compile(compile_goal, mcu_job(mod.main, (), platform); strip, optimize, validate, libraries=true)[1]
     end
     if target != :build
         return obj
@@ -346,29 +351,15 @@ function build(mod::Module, outpath; clear=false, target=:build, strip=true, opt
     @info "Building vectors"
     vectorasm_path = joinpath(buildpath, "vectors.asm")
     vectorobj_path = joinpath(buildpath, "vectors.o")
-    open(vectorasm_path, "w") do io
-        println(io, """
-          .vectors:
-                rjmp main
-          """)
-        # TODO: `println` additional calls for interrupt vectors
-    end
-    avr_as() do bin
-        run(`$bin -o $vectorobj_path $vectorasm_path`)
-    end
+    build_vectors(platform, vectorasm_path, vectorobj_path)
 
     @info "Linking object files to ELF"
     mainelf_name = string(nameof(mod), ".elf")
     builtelf_name = joinpath(buildpath, mainelf_name)
-    avr_ld() do bin
-        run(`$bin -v -o $builtelf_name $vectorobj_path $builtobj_path`)
-    end
+    link(platform, builtelf_name, vectorobj_path, builtobj_path)
 
-    mainhex_name = string(nameof(mod), ".hex")
-    builthex_name = joinpath(buildpath, mainhex_name)
-    avr_objcopy() do bin
-        run(`$bin -O ihex $builtelf_name $builthex_name`)
-    end
+    @info "Postprocessing"
+    postprocess(platform, builtelf_name)
 
     @info "Moving files from temporary directory to output directory"
     if clear
@@ -382,50 +373,6 @@ function build(mod::Module, outpath; clear=false, target=:build, strip=true, opt
         rm(latestpath)
     end
     symlink(basename(outpath), latestpath; dir_target=true)
-    nothing
-end
-
-"""
-    list_mcus()
-
-List the microcontrollers supported by `avrdude`.
-"""
-function list_mcus()
-    avrdude() do bin
-        run(Cmd(`$bin -p \?`; ignorestatus=true))
-    end
-    nothing
-end
-
-"""
-    flash(path, bin, partno
-          ; clear=true, verify=true, programmer=:arduino)
-
-Flash the binary `bin` to the device connected at `path`.
-`partno` specifies the microcontroller that will be flashed.
-
- * `clear` specifies whether to clear the flash ROM of the device
- * `verify` tells the programmer to verify the written data
- * `programmer` specifies the programmer to use for flashing
-
-!!! warn "Defaults"
-    This is intended as a convenient interface to `avrdude` from `avrdude_jll`.
-    For more complex configurations, consider using the JLL directly.
-    The defaults specified here are only tested for an Arduino Ethernet with an ATmega328p.
-
-!!! warn "Warranty"
-    Using this to flash your device is not guaranteed to succeed and no warranty of any kind
-    is given. Use at your own risk.
-"""
-function flash(path, binpath, partno; clear=true, verify=true, programmer=:arduino)
-    ispath(path) || throw(ArgumentError("`$path` is not a path."))
-    isfile(binpath) || throw(ArgumentError("`$binpath` is not a file."))
-    flasharg = ':' in binpath ? `flash:w:$binpath:a` : `$binpath`
-    verifyarg = verify ? `` : `-V`
-    cleararg = clear ? `` : `-D`
-    avrdude() do bin
-        run(`$bin $verifyarg -c $programmer -p $partno -P $path $cleararg -U $flasharg`)
-    end
     nothing
 end
 

@@ -1,4 +1,4 @@
-name = "AVRCompiler"
+name = "MCUCompiler"
 uuid = "680192cc-e9a1-4318-adc5-b31ee40f6b9b"
 authors = ["Sukera <Seelengrab@users.noreply.github.com>"]
 version = "0.4.3"

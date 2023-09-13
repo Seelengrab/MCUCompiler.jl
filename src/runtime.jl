@@ -22,5 +22,5 @@ module MCURuntime
 end
 
 GPUCompiler.runtime_module(::GPUCompiler.CompilerJob{<:MCUTarget}) = MCURuntime
-GPUCompiler.uses_julia_runtime(::GPUCompiler.CompilerJob{<:MCUTarget}) = true
+GPUCompiler.uses_julia_runtime(::GPUCompiler.CompilerJob{<:MCUTarget}) = false
 GPUCompiler.can_throw(::GPUCompiler.CompilerJob{<:MCUTarget}) = false

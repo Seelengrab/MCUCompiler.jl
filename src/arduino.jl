@@ -3,8 +3,7 @@ module Arduino
 using avr_binutils_jll
 using avrdude_jll
 
-import ..MCUCompiler: MCUCompiler, mcu_job, triple, build_vectors, link, postprocess
-import GPUCompiler: AbstractCompilerParams
+import ..MCUCompiler: MCUCompiler, mcu_job, triple, build_vectors, link, postprocess, PlatformParams
 
 #####
 # Compiler Target
@@ -12,7 +11,7 @@ import GPUCompiler: AbstractCompilerParams
 
 const ArduinoTarget = MCUCompiler.MCUTarget{:Arduino}
 
-struct ArduinoParams <: AbstractCompilerParams
+struct ArduinoParams <: PlatformParams
     name::String
 end
 

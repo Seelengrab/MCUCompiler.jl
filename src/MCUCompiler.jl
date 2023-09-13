@@ -8,11 +8,13 @@ using Pkg: Pkg
 using Dates
 using Logging
 
+const PlatformParams = GPUCompiler.AbstractCompilerParams
+
 include("array.jl")
 
 struct MCUTarget{T,P} <: GPUCompiler.AbstractCompilerTarget
     params::P
-    MCUTarget{T}(params::P) where {T,P <: GPUCompiler.AbstractCompilerParams} = new{T, P}(params)
+    MCUTarget{T}(params::P) where {T,P <: PlatformParams} = new{T, P}(params)
 end
 
 include("runtime.jl")

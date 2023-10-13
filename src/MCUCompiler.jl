@@ -335,6 +335,8 @@ function build(mod::Module, outpath, platform::MCUTarget; clear=false, target=:b
         end
     end
 
+    GPUCompiler.reset_runtime()
+
     compile_goal = target == :build ? :obj : target
     obj = GPUCompiler.JuliaContext() do ctx
         GPUCompiler.compile(compile_goal, mcu_job(mod.main, (), platform); strip, optimize, validate, libraries=true)[1]

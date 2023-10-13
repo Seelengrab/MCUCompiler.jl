@@ -1,7 +1,7 @@
 name = "MCUCompiler"
-uuid = "680192cc-e9a1-4318-adc5-b31ee40f6b9b"
+uuid = "ddf75b4f-3180-4598-923f-d1d8e472d959"
 authors = ["Sukera <Seelengrab@users.noreply.github.com>"]
-version = "0.4.3"
+version = "0.5.0"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"

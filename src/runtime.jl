@@ -3,7 +3,7 @@
 
 The base pointer for `malloc`. 
 """
-baseaddress
+function baseaddress end
 
 module MCURuntime
     # the runtime library

@@ -17,10 +17,12 @@ end
 
 triple(::ArduinoTarget) = "avr-unknown-unkown"
 
+MCUCompiler.baseaddress() = 0x0
+
 avr_job(@nospecialize(func), @nospecialize(types), platform=ArduinoTarget(ArduinoParams("$(nameof(func))"))) = mcu_job(func, types, platform)
 
 function build_vectors(::ArduinoTarget, asm_path, obj_path)
-    open(vectorasm_path, "w") do io
+    open(asm_path, "w") do io
         println(io, """
           .vectors:
                 rjmp main
@@ -28,7 +30,7 @@ function build_vectors(::ArduinoTarget, asm_path, obj_path)
         # TODO: `println` additional calls for interrupt vectors
     end
     avr_as() do bin
-        run(`$bin -o $vectorobj_path $vectorasm_path`)
+        run(`$bin -o $obj_path $asm_path`)
     end
 end
 
@@ -40,7 +42,9 @@ end
 
 function postprocess(at::ArduinoTarget, buildpath)
     mainhex_name = string(at.params.name, ".hex")
+    mainelf_name = string(at.params.name, ".elf")
     builthex_name = joinpath(buildpath, mainhex_name)
+    builtelf_name = joinpath(buildpath, mainelf_name)
     avr_objcopy() do bin
         run(`$bin -O ihex $builtelf_name $builthex_name`)
     end

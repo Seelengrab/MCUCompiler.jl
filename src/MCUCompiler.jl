@@ -285,7 +285,7 @@ end
 #####
 
 """
-    build(mod::Module[, outpath::String]; clear=false, target=:build, optimize=true, validate=true)
+    build(mod::Module, platform::MCUTarget[, outpath::String]; clear=false, target=:build, optimize=true, validate=true)
 
 Compile the module `mod` and prepare it for flashing to a device, building an ELF.
 This function expects a `main()` without arguments to exist, which will be used as the entry point.
@@ -363,7 +363,7 @@ function build(mod::Module, outpath, platform::MCUTarget; clear=false, target=:b
     link(platform, builtelf_name, vectorobj_path, builtobj_path)
 
     @info "Postprocessing"
-    postprocess(platform, builtelf_name)
+    postprocess(platform, buildpath)
 
     @info "Moving files from temporary directory to output directory"
     if clear

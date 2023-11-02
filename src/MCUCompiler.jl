@@ -68,6 +68,7 @@ end
 # target specific definitions
 include("arduino.jl")
 
+#=
 const jlfuncs = (cglobal(:jl_alloc_array_1d) => :jl_alloc_array_1d,
                  cglobal(:jl_alloc_array_2d) => :jl_alloc_array_2d,
                  cglobal(:jl_alloc_array_3d) => :jl_alloc_array_3d,
@@ -92,6 +93,7 @@ const jlfuncs = (cglobal(:jl_alloc_array_1d) => :jl_alloc_array_1d,
                  cglobal(:malloc) => :malloc,
                  cglobal(:memmove) => :memmove,
                  cglobal(:jl_symbol_n) => :jl_symbol_n)
+=#
 
 """
    is_object_moveable(obj)

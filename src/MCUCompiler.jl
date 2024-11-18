@@ -312,7 +312,7 @@ build(mod::Module, platform::MCUTarget; clear=true, target=:build, strip=true, o
 
 function build(mod::Module, outpath, platform::MCUTarget; clear=false, target=:build, strip=true, optimize=true, validate=true)
     !isdirpath(outpath) && throw(ArgumentError("Given path `$path` does not describe a directory (doesn't end with a path seperator like `/`)!"))
-    !hasproperty(mod, :main) && throw(ArgumentError("Module `$mod` doesn't have a `main` entrypoint!"))
+    !isdefined(mod, :main) && throw(ArgumentError("Module `$mod` doesn't have a `main` entrypoint!"))
     target in (:build, :llvm, :asm)  || throw(ArgumentError("Supplied unsupported target: `$target`"))
     any(m -> isone(m.nargs), methods(mod.main)) || throw(ArgumentError("`main` has no method taking zero arguments!"))
     buildpath = mktempdir()
